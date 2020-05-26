@@ -74,13 +74,13 @@ f_admCTL ()
      if ! [ -f "$vFileCTL" ]; then
         # Crea el Archivo CTL
         vEstProc="P"
-        vSubProc="00"
-        echo "${pEntAdq}|${pFecProc}|${vEstProc}|${vSubProc}|`date '+%Y%m%d%H%M%S'`" > $vFileCTL
+        #vSubProc="00"
+        echo "${pEntAdq}|${pFecProc}|${vEstProc}|`date '+%Y%m%d%H%M%S'`" > $vFileCTL
      else
         vEstProc=`awk '{print substr($0,16,1)}' $vFileCTL`
      fi
   else
-     echo "${pEntAdq}|${pFecProc}|${vEstProc}|${vSubProc}|`date '+%Y%m%d%H%M%S'`" > $vFileCTL
+     echo "${pEntAdq}|${pFecProc}|${vEstProc}|`date '+%Y%m%d%H%M%S'`" > $vFileCTL
   fi
 
 }
@@ -127,7 +127,7 @@ echo "
 ${dpNom} - Parametros de Ejecucion
 
 Parametro 1 (obligatorio) : Fecha de Proceso [Formato=YYYYMMDD]
-Parametro 2 (opcional) : Confirmación de Reproceso [S=Si]
+Parametro 2 (opcional) : Opción de Reproceso [s/S]
 
 --------------------------------------------------------------------------------
 Programa: ${dpNom} | Version: ${dpVer} | Modificacion: 
@@ -174,56 +174,73 @@ fi
 ################################################################################
 
 if [ "${pFecProc}" -ne "${dFecProc}" ]; then
-    echo "La Fecha de Proceso no puede ser menor ni mayor a la fecha actual ${pFecProc}"   
+ echo "La Fecha de Proceso no puede ser menor ni mayor a la fecha actual ${pFecProc}"   
 else
-  vFileLOG="${DIRLOG}/SGCPINCMCMinimo$dFecProc.log"
-  #vFileLOGERR="${DIRLOG}/repcompBM$FechaREP.err"
-  pEntAdq="BM"
-  #pFecProc=$FechaREP
-  vFileCTL="${DIRDAT}/SGCPINCMCMinimo${pEntAdq}.${pFecProc}.CTL"
-  f_admCTL R
-  vEstProc=`awk '{print substr($0,13,1)}' $vFileCTL 2>/dev/null`
-   if [ "$vEstProc" = "F" ] && [ "$vOpcRepro" != "S" ]
-   then
+ vFileLOG="${DIRLOG}/SGCPINCMCMinimo$dFecProc.log"
+ #vFileLOGERR="${DIRLOG}/repcompBM$FechaREP.err"
+ pEntAdq="BM"
+ #pFecProc=$FechaREP
+ vFileCTL="${DIRDAT}/SGCPINCMCMinimo${pEntAdq}.${pFecProc}.CTL"
+ f_admCTL R
+ vEstProc=`awk '{print substr($0,13,1)}' $vFileCTL 2>/dev/null`
+   if [ "$vEstProc" = "F" ] && [ "$vOpcRepro" = "" ]; then
      tput setf 8
      echo "El valor de Monto Minimo para la fecha ${pFecProc} ya ha sido procesado"
      tput setf 7
-     exit 0
-   else
-    tput setf 8
-     echo "Se procederá a setear el valor del Monto Mínimo para la fecha {$pFecProc}"
-     tput setf 7
-      #echo "vamos a ver si esto funciona ;)"
-DiaSemana= `sqlplus -s $DB << !
-SET SERVEROUTPUT ON
-SET FEED OFF
-spool ${DIRTMP}/${pFecProc}.txt
-DECLARE
-pTasaCambioDate VARCHAR2(50) := ${pFecProc};
-p_MontoMinimo NUMBER;
-BEGIN
-PKG_MONTOMINIMO_TRANS.p_CalcMontoMinimoTC(pTasaCambioDate, p_MontoMinimo);
-
-END;
-/
-spool off
-exit;`
- echo "$DiaSemana"
-
-   #f_finerr "ERROR: Archivo <${vNomFile}> no encontrado."
-
-    
-      #Aquí debe de ir el resto del código correspondiente al proceso    
-      #colocar el código del store procedure         
-      ERRSTATUS=$?
-      vSubProc="00"
-      if [ "$ERRSTATUS" = "0" ]
-      then
-         vEstProc="E"
-      else
-         vEstProc="F"
-      fi
-      f_admCTL W
-      echo "FIN"
+     echo "Desea Reprocesar? (S=Si/N=No/<Enter>=No) => \c"
+     read vOpcRepro 
+     continue
+     #vOpcRepro = $valRepro
    fi
+   if [ -f "$vFileLOG" ]; then
+     rm -f $vFileLOG
+   fi 
+    touch $vFileLOG
+    if [ "$vEstProc" = "F" ] && [ "$vOpcRepro" = "S" ] || [ "$vOpcRepro" = "s" ] || [ "$vEstProc" != "F" ] ; then
+      tput setf 8
+      echo "Se procederá a setear el valor del Monto Mínimo para la fecha de Proceso: $pFecProc" | tee -a $vFileLOG
+      tput setf 7
+      DiaSemana= `sqlplus -s $DB << !
+      SET SERVEROUTPUT ON
+      SET FEED OFF
+      spool ${DIRTMP}/${pFecProc}.txt
+      DECLARE
+      p_TasaCambioDate VARCHAR2(50) := ${pFecProc};
+      p_MontoMinimo VARCHAR2(50);
+      BEGIN
+      PQMONTOMINIMO.p_CalcMontoMinimoTC(p_TasaCambioDate, p_MontoMinimo);
+      END;
+      /
+      spool off
+      exit;`  2> /dev/null 
+      tput setf 8
+      echo "Se procedió a descargar de Base de Datos el Monto Minimo para la fecha $pFecProc" | tee -a $vFileLOG
+      tput setf 7
+      pMontoMin=$(<${DIRTMP}/${pFecProc}.txt)
+      pCont=`expr length $pMontoMin` 
+        if  [ ! -f $DIRTMP/$pFecProc.txt ] || [ -s DIRTMP/$pFecProc.txt ] || [ "$pCont" -ne 12 ] || [ -n "$(printf '%s\n' $pMontoMin | sed 's/[0-9]//g')" ];then
+          tput setf 8
+          echo "El archivo no existe o no cumple con las especificaciones, favor revisar" | tee -a $vFileLOG
+          tput setf 7
+          exit 0          
+        else 
+          tput setf 8
+          echo "El archivo cumple con las especificaciones, se procede a hacer conversion del archivo .DAT" | tee -a $vFileLOG
+          tput setf 7
+          chmod 755 ${DIRTMP}/${pFecProc}.txt
+          mv ${DIRTMP}/${pFecProc}.txt ${DIROUT}/DMINIMO.dat 
+          #Aqui se incluye las lineas para pasar por sftp el archivo 
+          ERRSTATUS=$?
+          #vSubProc="00"
+           if [ "$ERRSTATUS" = "0" ]
+             then
+             vEstProc="E"
+           else
+             vEstProc="F"
+           fi
+            f_admCTL W
+        fi
+      exit 0 
+    fi
+   echo "Fin de Programa"     
 fi
