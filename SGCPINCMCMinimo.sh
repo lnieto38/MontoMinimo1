@@ -98,7 +98,7 @@ pMsg="$1"
 if [ "${pMsg}" != "" ]; then
    f_fhmsg "${pMsg}"
 fi
-f_msgtit E
+#f_msgtit E
 }
 
 
@@ -117,6 +117,40 @@ fi
 }
 
 
+# f_parametros | muestra los parametros de ejecucion
+################################################################################
+f_parametros ()
+{
+#f_fechora ${dFecProc}
+echo "
+--------------------------------------------------------------------------------
+${dpNom} - Parametros de Ejecucion
+
+Parametro 1 (obligatorio) : Fecha de Proceso [Formato=YYYYMMDD]
+Parametro 2 (opcional) : Confirmación de Reproceso [S=Si]
+
+--------------------------------------------------------------------------------
+Programa: ${dpNom} | Version: ${dpVer} | Modificacion: 
+" | more
+}
+
+
+################################################################################
+
+## Validacion de Parametros
+################################################################################
+
+# Menu de parametros
+if [ $# -eq 0 ]; then
+   f_parametros;
+   exit 0;
+fi
+
+# Parametros obligatorios (4)
+if [ $# -lt 1 ]; then
+   f_parametros;
+   exit 1;
+fi
 
 
 ##############################################################################################
@@ -140,7 +174,7 @@ fi
 ################################################################################
 
 if [ "${pFecProc}" -ne "${dFecProc}" ]; then
-    echo "La Fecha de proceso no puede ser menor ni mayor a la fecha actual ${vFecProc}"   
+    echo "La Fecha de Proceso no puede ser menor ni mayor a la fecha actual ${pFecProc}"   
 else
   vFileLOG="${DIRLOG}/SGCPINCMCMinimo$dFecProc.log"
   #vFileLOGERR="${DIRLOG}/repcompBM$FechaREP.err"
@@ -160,11 +194,24 @@ else
      echo "Se procederá a setear el valor del Monto Mínimo para la fecha {$pFecProc}"
      tput setf 7
       #echo "vamos a ver si esto funciona ;)"
-DiaSemana=`sqlplus -s $DB << !
-set head off
-set pagesize 0000
-select to_char(to_date('$vFecProc','YYYYMMDD'),'D') from dual;`
-    echo "$DiaSemana"
+DiaSemana= `sqlplus -s $DB << !
+SET SERVEROUTPUT ON
+SET FEED OFF
+spool ${DIRTMP}/${pFecProc}.txt
+DECLARE
+pTasaCambioDate VARCHAR2(50) := ${pFecProc};
+p_MontoMinimo NUMBER;
+BEGIN
+PKG_MONTOMINIMO_TRANS.p_CalcMontoMinimoTC(pTasaCambioDate, p_MontoMinimo);
+
+END;
+/
+spool off
+exit;`
+ echo "$DiaSemana"
+
+   #f_finerr "ERROR: Archivo <${vNomFile}> no encontrado."
+
     
       #Aquí debe de ir el resto del código correspondiente al proceso    
       #colocar el código del store procedure         

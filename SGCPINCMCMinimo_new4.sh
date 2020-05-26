@@ -23,7 +23,7 @@
 ## Datos del Programa
 ################################################################################
 
-dpNom="SGCPINCMCMminimo"      # Nombre del Programa
+dpNom="SGCPINCMCMinimo"      # Nombre del Programa
 dpDesc=""                     # Descripcion del Programa
 dpVer=1.00                    # Ultima Version del Programa
 dpFec="20200905"              # Fecha de Ultima Actualizacion [Formato:AAAAMMDD]
@@ -98,7 +98,7 @@ pMsg="$1"
 if [ "${pMsg}" != "" ]; then
    f_fhmsg "${pMsg}"
 fi
-f_msgtit E
+#f_msgtit E
 }
 
 
@@ -117,6 +117,40 @@ fi
 }
 
 
+# f_parametros | muestra los parametros de ejecucion
+################################################################################
+f_parametros ()
+{
+#f_fechora ${dFecProc}
+echo "
+--------------------------------------------------------------------------------
+${dpNom} - Parametros de Ejecucion
+
+Parametro 1 (obligatorio) : Fecha de Proceso [Formato=YYYYMMDD]
+Parametro 2 (opcional) : Opción de Reproceso [s/S]
+
+--------------------------------------------------------------------------------
+Programa: ${dpNom} | Version: ${dpVer} | Modificacion: 
+" | more
+}
+
+
+################################################################################
+
+## Validacion de Parametros
+################################################################################
+
+# Menu de parametros
+if [ $# -eq 0 ]; then
+   f_parametros;
+   exit 0;
+fi
+
+# Parametros obligatorios (4)
+if [ $# -lt 1 ]; then
+   f_parametros;
+   exit 1;
+fi
 
 
 ##############################################################################################
@@ -140,43 +174,74 @@ fi
 ################################################################################
 
 if [ "${pFecProc}" -ne "${dFecProc}" ]; then
-    echo "La Fecha de proceso no puede ser menor ni mayor a la fecha actual ${vFecProc}"   
+ echo "La Fecha de Proceso no puede ser menor ni mayor a la fecha actual ${pFecProc}"   
 else
-  vFileLOG="${DIRLOG}/SGCPINCMCMinimo$dFecProc.log"
-  #vFileLOGERR="${DIRLOG}/repcompBM$FechaREP.err"
-  pEntAdq="BM"
-  #pFecProc=$FechaREP
-  vFileCTL="${DIRDAT}/SGCPINCMCMinimo${pEntAdq}.${pFecProc}.CTL"
-  f_admCTL R
-  vEstProc=`awk '{print substr($0,13,1)}' $vFileCTL 2>/dev/null`
-   if [ "$vEstProc" = "F" ] && [ "$vOpcRepro" != "S" ]
-   then
+ vFileLOG="${DIRLOG}/SGCPINCMCMinimo$dFecProc.log"
+ #vFileLOGERR="${DIRLOG}/repcompBM$FechaREP.err"
+ pEntAdq="BM"
+ #pFecProc=$FechaREP
+ vFileCTL="${DIRDAT}/SGCPINCMCMinimo${pEntAdq}.${pFecProc}.CTL"
+ f_admCTL R
+ vEstProc=`awk '{print substr($0,13,1)}' $vFileCTL 2>/dev/null`
+   if [ "$vEstProc" = "F" ] && [ "$vOpcRepro" = "" ]; then
      tput setf 8
      echo "El valor de Monto Minimo para la fecha ${pFecProc} ya ha sido procesado"
      tput setf 7
-     exit 0
-   else
-    tput setf 8
-     echo "Se procederá a setear el valor del Monto Mínimo para la fecha {$pFecProc}"
-     tput setf 7
-      #echo "vamos a ver si esto funciona ;)"
-DiaSemana=`sqlplus -s $DB << !
-set head off
-set pagesize 0000
-select to_char(to_date('$vFecProc','YYYYMMDD'),'D') from dual;`
-    echo "$DiaSemana"
-    
-      #Aquí debe de ir el resto del código correspondiente al proceso    
-      #colocar el código del store procedure         
-      ERRSTATUS=$?
-      vSubProc="00"
-      if [ "$ERRSTATUS" = "0" ]
-      then
-         vEstProc="E"
-      else
-         vEstProc="F"
-      fi
-      f_admCTL W
-      echo "FIN"
+     echo "Desea Reprocesar? (S=Si/N=No/<Enter>=No) => \c"
+     read vOpcRepro 
+     continue
+     #vOpcRepro = $valRepro
    fi
+   if [ -f "$vFileLOG" ]; then
+     rm -f $vFileLOG
+   fi 
+    touch $vFileLOG
+    if [ "$vEstProc" = "F" ] && [ "$vOpcRepro" = "S" ] || [ "$vOpcRepro" = "s" ] || [ "$vEstProc" != "F" ] ; then
+      tput setf 8
+      echo "Se procederá a setear el valor del Monto Mínimo para la fecha de Proceso: $pFecProc" | tee -a $vFileLOG
+      tput setf 7
+      DiaSemana= `sqlplus -s $DB << !
+      SET SERVEROUTPUT ON
+      SET FEED OFF
+      spool ${DIRTMP}/${pFecProc}.txt
+      DECLARE
+      p_TasaCambioDate VARCHAR2(50) := ${pFecProc};
+      p_MontoMinimo VARCHAR2(50);
+      BEGIN
+      PQMONTOMINIMO.p_CalcMontoMinimoTC(p_TasaCambioDate, p_MontoMinimo);
+      END;
+      /
+      spool off
+      exit;`  2> /dev/null 
+      tput setf 8
+      echo "Se procedió a descargar de Base de Datos el Monto Minimo para la fecha $pFecProc" | tee -a $vFileLOG
+      tput setf 7
+      pMontoMin=$(<${DIRTMP}/${pFecProc}.txt)
+      pCont=`expr length $pMontoMin` 
+        if  [ ! -f $DIRTMP/$pFecProc.txt ] || [ -s DIRTMP/$pFecProc.txt ] || [ "$pCont" -ne 12 ] || [ -n "$(printf '%s\n' $pMontoMin | sed 's/[0-9]//g')" ];then
+       #  if  [ ! -f $DIRTMP/$pFecProc.txt ] || [ -s DIRTMP/$pFecProc.txt ]; then
+          tput setf 8
+          echo "El archivo no existe o no cumple con las especificaciones, favor revisar" | tee -a $vFileLOG
+          tput setf 7
+          exit 0          
+        else 
+          tput setf 8
+          echo "El archivo cumple con las especificaciones, se procede a hacer conversion del archivo .DAT" | tee -a $vFileLOG
+          tput setf 7
+          chmod 755 ${DIRTMP}/${pFecProc}.txt
+          mv ${DIRTMP}/${pFecProc}.txt ${DIROUT}/DMINIMO.dat 
+          #Aqui se incluye las lineas para pasar por sftp el archivo 
+          ERRSTATUS=$?
+          vSubProc="00"
+           if [ "$ERRSTATUS" = "0" ]
+             then
+             vEstProc="E"
+           else
+             vEstProc="F"
+           fi
+            f_admCTL W
+        fi
+      exit 0 
+    fi
+   echo "Fin de Programa"     
 fi
