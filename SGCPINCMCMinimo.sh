@@ -11,7 +11,8 @@
 ##
 ##  Fecha      Autor Version Descripcion de la Modificacion
 ##  ---------- ----- ------- ---------------------------------------------------
-##  11/01/2008 LDN   1.00    Codigo Inicial
+##  11/05/2020 LDN   1.00    Codigo Inicial
+##  01/06/2020 LDN   1.50    Cambios Significativos 
 ##
 ################################################################################
 
@@ -23,10 +24,10 @@
 ## Datos del Programa
 ################################################################################
 
-dpNom="SGCPINCMCMminimo"      # Nombre del Programa
+dpNom="SGCPINCMCMinimo"       # Nombre del Programa
 dpDesc=""                     # Descripcion del Programa
-dpVer=1.00                    # Ultima Version del Programa
-dpFec="20200905"              # Fecha de Ultima Actualizacion [Formato:AAAAMMDD]
+dpVer=1.50                    # Ultima Version del Programa
+dpFec="20200602"              # Fecha de Ultima Actualizacion [Formato:AAAAMMDD]
 
 ## Variables del Programa
 ################################################################################
@@ -35,6 +36,7 @@ vpValRet=""                   # Valor de Retorno (funciones)
 vpFH=`date '+%Y%m%d%H%M%S'`   # Fecha y Hora [Formato:AAAAMMDDHHMMSS]
 vpFileLOG=""                  # Nombre del Archivo LOG del Programa
 dFecProc=`getdate`            # Fecha Actual [Formato:AAAAMMDD]
+vFileDat=$DIRTMP/MontoMinimo.tmp
 
 ## Parametros
 ################################################################################
@@ -123,13 +125,13 @@ f_parametros ()
 {
 #f_fechora ${dFecProc}
 echo "
---------------------------------------------------------------------------------
+********************************************************************************
 ${dpNom} - Parametros de Ejecucion
 
 Parametro 1 (obligatorio) : Fecha de Proceso [Formato=YYYYMMDD]
-Parametro 2 (opcional) : Opción de Reproceso [s/S]
+Parametro 2 (opcional) : Opcion de Reproceso [s/S]
 
---------------------------------------------------------------------------------
+********************************************************************************
 Programa: ${dpNom} | Version: ${dpVer} | Modificacion: 
 " | more
 }
@@ -172,9 +174,13 @@ else
 fi
 
 ################################################################################
+## INICIO | PROCEDIMIENTO PRINCIPAL
+################################################################################
 
 if [ "${pFecProc}" -ne "${dFecProc}" ]; then
- echo "La Fecha de Proceso no puede ser menor ni mayor a la fecha actual ${pFecProc}"   
+ echo "********************************************************************************"
+ echo `date '+%H:%M:%S'` "> La Fecha de Proceso no puede ser menor ni mayor a la fecha actual ${pFecProc}" 
+ echo "********************************************************************************"
 else
  vFileLOG="${DIRLOG}/SGCPINCMCMinimo$dFecProc.log"
  #vFileLOGERR="${DIRLOG}/repcompBM$FechaREP.err"
@@ -184,26 +190,44 @@ else
  f_admCTL R
  vEstProc=`awk '{print substr($0,13,1)}' $vFileCTL 2>/dev/null`
    if [ "$vEstProc" = "F" ] && [ "$vOpcRepro" = "" ]; then
+     echo "********************************************************************************"
+     echo "OPCION REPROCESO"
+     echo "********************************************************************************"
+     echo
      tput setf 8
      echo "El valor de Monto Minimo para la fecha ${pFecProc} ya ha sido procesado"
      tput setf 7
      echo "Desea Reprocesar? (S=Si/N=No/<Enter>=No) => \c"
+     echo
      read vOpcRepro 
      continue
-     #vOpcRepro = $valRepro
    fi
    if [ -f "$vFileLOG" ]; then
      rm -f $vFileLOG
    fi 
     touch $vFileLOG
     if [ "$vEstProc" = "F" ] && [ "$vOpcRepro" = "S" ] || [ "$vOpcRepro" = "s" ] || [ "$vEstProc" != "F" ] ; then
+      echo "********************************************************************************"         
+               echo 
+               echo 
+               echo "         Archivo de Control : `basename ${vFileCTL}`"
+               echo "                 Directorio : `dirname ${vFileCTL}`"
+               echo "   Archivo LOG de Ejecucion : `basename ${vFileLOG}`"
+               echo "                 Directorio : `dirname ${vFileLOG}`"
+               echo                 
+
+      echo "********************************************************************************"
+      echo 
+      echo "**********************************************************"  [`date '+%d.%m.%Y'` `date '+%H:%M:%S'`] | tee -a $vFileLOG
+      echo "INICIO | ${dpNom} EJECUCION DE MONTO MINIMO" | tee -a $vFileLOG
+      echo "********************************************************************************" | tee -a $vFileLOG
       tput setf 8
-      echo "Se procederá a setear el valor del Monto Mínimo para la fecha de Proceso: $pFecProc" | tee -a $vFileLOG
+      echo `date '+%H:%M:%S'` "> Seteando el valor del Monto Minimo fecha de Proceso: $pFecProc" | tee -a $vFileLOG
       tput setf 7
-      DiaSemana= `sqlplus -s $DB << !
+      ora= `sqlplus -s $DB << !
       SET SERVEROUTPUT ON
       SET FEED OFF
-      spool ${DIRTMP}/${pFecProc}.txt
+      spool ${DIRTMP}/mm${pFecProc}.txt
       DECLARE
       p_TasaCambioDate VARCHAR2(50) := ${pFecProc};
       p_MontoMinimo VARCHAR2(50);
@@ -214,33 +238,83 @@ else
       spool off
       exit;`  2> /dev/null 
       tput setf 8
-      echo "Se procedió a descargar de Base de Datos el Monto Minimo para la fecha $pFecProc" | tee -a $vFileLOG
+      echo `date '+%H:%M:%S'` "> Procediendo a descargar de DB Monto Minimo de fecha $pFecProc" | tee -a $vFileLOG
       tput setf 7
-      pMontoMin=$(<${DIRTMP}/${pFecProc}.txt)
-      pCont=`expr length $pMontoMin` 
-        if  [ ! -f $DIRTMP/$pFecProc.txt ] || [ -s DIRTMP/$pFecProc.txt ] || [ "$pCont" -ne 12 ] || [ -n "$(printf '%s\n' $pMontoMin | sed 's/[0-9]//g')" ];then
-          tput setf 8
-          echo "El archivo no existe o no cumple con las especificaciones, favor revisar" | tee -a $vFileLOG
-          tput setf 7
-          exit 0          
-        else 
-          tput setf 8
-          echo "El archivo cumple con las especificaciones, se procede a hacer conversion del archivo .DAT" | tee -a $vFileLOG
-          tput setf 7
-          chmod 755 ${DIRTMP}/${pFecProc}.txt
-          mv ${DIRTMP}/${pFecProc}.txt ${DIROUT}/DMINIMO.dat 
-          #Aqui se incluye las lineas para pasar por sftp el archivo 
-          ERRSTATUS=$?
-          #vSubProc="00"
-           if [ "$ERRSTATUS" = "0" ]
-             then
-             vEstProc="E"
-           else
-             vEstProc="F"
+      sed 's/ //g' $DIRTMP/mm$pFecProc.txt > $DIRTMP/mm$pFecProc-1.txt
+      cat $DIRTMP/mm$pFecProc-1.txt > $DIRTMP/mm$pFecProc.txt
+      rm -f  $DIRTMP/mm$pFecProc-1.txt
+      pMontoMin=$(<${DIRTMP}/mm${pFecProc}.txt)
+      pCont=`expr length $pMontoMin 2> /dev/null`  
+      oraCont=`grep -i 'ORA' $DIRTMP/mm$pFecProc.txt | wc -l`
+        if [ "$oraCont" -gt 0 ]; then
+         echo "********************************************************************************" | tee -a $vFileLOG
+         echo `date '+%H:%M:%S'` "> ERROR | Errores ORA en la ejecucion del Paquete favor informar DBA" | tee -a $vFileLOG
+         cat $DIRTMP/mm$pFecProc.txt >> $vFileLOG 
+         echo "********************************************************************************" | tee -a $vFileLOG
+         sqlplus -s $DB @$DIRBIN/alertacie INC MMINIMO "Error_Ejecucion_de_Package_Fecha_$pFecProc"
+         rm -f $DIRTMP/mm$pFecProc.txt 
+         exit 0
+        else             
+           if  [ ! -f $DIRTMP/mm$pFecProc.txt ] || [ -s DIRTMP/mm$pFecProc.txt ] || [ "$pCont" -ne 12 ] || [ -n "$(printf '%s\n' $pMontoMin | sed 's/[0-9]//g')" ];then
+             echo
+             echo "********************************************************************************" | tee -a $vFileLOG
+             tput setf 8
+             echo `date '+%H:%M:%S'` "> El archivo no existe o no cumple con las especificaciones" | tee -a $vFileLOG
+             echo "********************************************************************************" | tee -a $vFileLOG
+             sqlplus -s $DB @$DIRBIN/alertacie INC MMINIMO "Error_Especificaciones_de_Archivo_MontoMinimo_Fecha_$pFecProc"
+             tput setf 7
+             exit 0          
+           else 
+             echo
+             echo "********************************************************************************" | tee -a $vFileLOG
+             tput setf 8
+             echo `date '+%H:%M:%S'` "> El archivo cumple con todas las especificaciones" | tee -a $vFileLOG
+             tput setf 7
+             echo "********************************************************************************" | tee -a $vFileLOG
+             chmod 755 ${DIRTMP}/mm${pFecProc}.txt
+             mv ${DIRTMP}/mm${pFecProc}.txt ${DIROUT}/DMINIMO.DAT 
+             #Aqui se incluye las lineas para pasar por sftp el archivo 
+             #cd ${DIROUT}
+             #echo "cd /#d11/ccal/datos" > $DIRTMP/MontoMinimo$pFecProc.PAR.SFTP 
+             #echo "put ${DIROUT}/DMINIMO_prueba.DAT" >> $DIRTMP/MontoMinimo$pFecProc.PAR.SFTP
+             #sftp -b $DIRTMP/MontoMinimo$pFecProc.PAR.SFTP $FTP_USERSTR@10.161.80.169 >> $vFileLOG 2>&1
+             echo `date '+%H:%M:%S'` "> Envio via FTP el DMINIMO.DAT al STRATUS" | tee -a $vFileLOG
+             echo "$DIRSTRDAT>DMINIMO.DAT" > $vFileDat
+             echo "$DIROUT/DMINIMO.DAT" >> $vFileDat
+             if [ -f $vFileDat ]; then
+                sh FTPSun2Str1.sh < $vFileDat ;
+                echo "********************************************************************************" | tee -a $vFileLOG
+                echo  `date '+%H:%M:%S'` "> Revisar que el archivo DMINIMO.DAT ya se encuentra en el STRATUS" | tee -a $vFileLOG
+                echo "********************************************************************************" | tee -a $vFileLOG
+                ENDSTATUS=0
+             else
+               echo "********************************************************************************" | tee -a $vFileLOG
+                echo `date '+%H:%M:%S'` "> No se ha creado el archivo $vFileDat" | tee -a $vFileLOG
+                echo "********************************************************************************" | tee -a $vFileLOG
+                ENDSTATUS=1
+                exit 1;
+             fi 
+                rm -f $vFileDat            
+              if [ "$ENDSTATUS" = "0" ]
+                then
+                 vEstProc="F"
+                 echo "**********************************************************"  [`date '+%d.%m.%Y'` `date '+%H:%M:%S'`] | tee -a $vFileLOG
+                 echo "FIN OK| PROCESO MONTO MINIMO FINALIZADO SATISFACTORIAMENTE" | tee -a $vFileLOG
+                 echo "********************************************************************************" | tee -a $vFileLOG
+                else
+                 vEstProc="E"
+                 echo "**********************************************************"  [`date '+%d.%m.%Y'` `date '+%H:%M:%S'`] | tee -a $vFileLOG
+                 echo "FIN ERROR| NO PUDO COMPLETARSE EL PROCESO DE MONTO MINIMO, FAVOR REVISAR" | tee -a $vFileLOG
+                 echo "********************************************************************************" | tee -a $vFileLOG
+                fi
+                f_admCTL W
            fi
-            f_admCTL W
-        fi
-      exit 0 
-    fi
-   echo "Fin de Programa"     
+         exit 0 
+        fi 
+   fi
+    echo "Fin de Programa"     
 fi
+
+################################################################################
+## FIN | PROCEDIMIENTO PRINCIPAL
+################################################################################
